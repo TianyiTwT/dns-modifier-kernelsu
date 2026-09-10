@@ -1,0 +1,815 @@
+/*
+ * style.css —— 自定义 DNS WebUI
+ *
+ * 结构照抄 dhcpv6-client 模块的皮肤，只把内容换成本模块的控件。两个维度：
+ *
+ * 皮肤：html[data-skin="miuix" | "material3"]
+ * 明暗：html[data-theme="light" | "dark"]
+ *
+ * 「跟随系统」不是在 CSS 里用 prefers-color-scheme 实现的，而是由 index.html
+ * <head> 里的一小段内联脚本在**首次绘制之前**解析成具体的 light/dark 写进
+ * data-theme。这么做是为了少抄一遍深色 token（媒体查询里一半、属性选择器里
+ * 又一半，两处迟早会不同步），代价是需要 JS —— 而 WebView 里 JS 一定在。
+ *
+ * ── 配色纪律：一屏只有一个彩色主角 ───────────────────────────────
+ *
+ *   · 蓝（--accent）＝ 可交互的东西：主按钮、开关、输入框聚焦环；
+ *   · 绿（--ok）    ＝ 只做状态图标，**不染文字、不做底色上的文字色**；
+ *   · 红（--danger）＝ 异常；
+ *   · 其余全部中性灰。
+ *
+ * 实心填充用 --accent，落在面上的蓝字与描边用 --accent-fg（深色下两者分岔，
+ * 见 token 注释）。这一屏的蓝色主角只有一个：底部那个实心主按钮。开关的
+ * 选中色也算蓝，但它是小面积、且在用户手指下的，不与按钮抢戏。
+ *
+ * ── 两套皮肤必须「一眼可辨」，不是微调 ───────────────────────────
+ *
+ *   Miuix（MIUI / HyperOS）：顶栏只留图标、标题下放成正文大字、无描边大圆角
+ *     卡片靠白底浮起、全药丸按钮、顶栏底栏磨砂。
+ *   Material 3：顶栏用 surface-container 染色并承载标题、**轮廓卡**（透明底 +
+ *     描边）、filled tonal + filled 两级按钮、12px 圆角、不磨砂。
+ *
+ * ── 磨砂玻璃的适用范围 ───────────────────────────────────────────
+ *
+ * 只给 Miuix 的顶栏、底部操作条、设置面板的遮罩用 —— 它们浮在滚动内容之上，
+ * 有东西可透。M3 走的是不透明 surface 层次，不用磨砂。backdrop-filter 在老
+ * WebView 上不生效，所以每一处都配了不透明兜底（见各处的 @supports not）。
+ */
+
+/* ══════════════════════════════════════════════ token */
+
+:root[data-theme="light"] {
+	--bg:            #f5f5f5;
+	--surface:       #ffffff;
+	--surface-2:     #f2f2f2;
+	--surface-3:     #f7f7f7;
+	--line:          #ebebeb;
+	--line-2:        #e0e0e0;
+
+	--text:          #000000;
+	--text-2:        #8e8e93;
+	--text-3:        #b0b0b5;
+
+	--accent:        #3478f6;
+	--on-accent:     #ffffff;
+	--accent-weak:   #eef4ff;
+	/* 落在浅色面**上**的蓝字（描边按钮文字、选中项文字、标签）单独一个色号：
+	   实心填充用 --accent，文字用 --accent-fg。深色下两者会分岔，见下。 */
+	--accent-fg:     #3478f6;
+
+	/* M3 的 top app bar 底色。和 --bg 分开才有「一条顶栏」的观感，
+	   这是把 M3 和 Miuix 一眼区分开的最关键一条。 */
+	--surface-container: #eceef1;
+
+	--ok:            #34c759;
+	--ok-bg:         #e9f7ec;
+	--danger:        #ff3b30;
+
+	--glass:         rgba(255, 255, 255, 0.72);
+	--glass-line:    rgba(0, 0, 0, 0.06);
+	--scrim:         rgba(0, 0, 0, 0.28);
+
+	--shadow-sheet:  0 -1px 32px rgba(0, 0, 0, 0.14);
+	color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+	--bg:            #000000;
+	--surface:       #1c1c1e;
+	--surface-2:     #2c2c2e;
+	--surface-3:     #141416;
+	--line:          #2c2c2e;
+	--line-2:        #3a3a3c;
+
+	--text:          #ffffff;
+	--text-2:        #8e8e93;
+	--text-3:        #636366;
+
+	--accent:        #3478f6;
+	--on-accent:     #ffffff;
+	--accent-weak:   #12233a;
+	/* #3478f6 压在 #2c2c2e 上只有约 2.9:1（浅色下压白底是 4.2:1），
+	   所以深色里的蓝字必须提亮，同一个色号不能两处通用。 */
+	--accent-fg:     #8ab4f8;
+
+	--surface-container: #1f2023;
+
+	--ok:            #30d158;
+	--ok-bg:         #12291a;
+	--danger:        #ff453a;
+
+	--glass:         rgba(28, 28, 30, 0.72);
+	--glass-line:    rgba(255, 255, 255, 0.08);
+	--scrim:         rgba(0, 0, 0, 0.55);
+
+	--shadow-sheet:  0 -1px 32px rgba(0, 0, 0, 0.6);
+	color-scheme: dark;
+}
+
+/* 没拿到 data-theme 时的兜底（内联脚本被挡掉才会走到这里） */
+:root {
+	--bg: #f5f5f5; --surface: #ffffff; --surface-2: #f2f2f2; --surface-3: #f7f7f7;
+	--line: #ebebeb; --line-2: #e0e0e0;
+	--text: #000000; --text-2: #8e8e93; --text-3: #b0b0b5;
+	--accent: #3478f6; --on-accent: #ffffff; --accent-weak: #eef4ff;
+	--accent-fg: #3478f6; --surface-container: #eceef1;
+	--ok: #34c759; --ok-bg: #e9f7ec; --danger: #ff3b30;
+	--glass: rgba(255,255,255,0.72); --glass-line: rgba(0,0,0,0.06);
+	--scrim: rgba(0,0,0,0.28); --shadow-sheet: 0 -1px 32px rgba(0,0,0,0.14);
+	color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme]) {
+		--bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e; --surface-3: #141416;
+		--line: #2c2c2e; --line-2: #3a3a3c;
+		--text: #ffffff; --text-2: #8e8e93; --text-3: #636366;
+		--accent: #3478f6; --on-accent: #ffffff; --accent-weak: #12233a;
+		--accent-fg: #8ab4f8; --surface-container: #1f2023;
+		--ok: #30d158; --ok-bg: #12291a; --danger: #ff453a;
+		--glass: rgba(28,28,30,0.72); --glass-line: rgba(255,255,255,0.08);
+		--scrim: rgba(0,0,0,0.55); --shadow-sheet: 0 -1px 32px rgba(0,0,0,0.6);
+		color-scheme: dark;
+	}
+}
+
+/* 字体栈不带 system-ui / Roboto / Inter —— 中文按 Noto Sans CJK 落到系统字体，
+   地址用等宽，因为它本来就是一串要逐位核对的字符。 */
+:root {
+	--sans: "Noto Sans SC", "Source Han Sans SC", "PingFang SC",
+	        "Microsoft YaHei", sans-serif;
+	--mono: "Noto Sans Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+	--r-card: 20px;
+	--r-sunk: 12px;
+	--title-size: 32px;
+	--title-weight: 700;
+}
+
+/* ══════════════════════════════════════════════ 皮肤差异 */
+
+/* ── Miuix：大标题 + 无边框大圆角卡 + 磨砂顶栏底栏 ───────────── */
+
+:root[data-skin="miuix"] .topbar {
+	background: var(--glass);
+	-webkit-backdrop-filter: saturate(180%) blur(20px);
+	backdrop-filter: saturate(180%) blur(20px);
+	border-bottom: 1px solid var(--glass-line);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+	:root[data-skin="miuix"] .topbar { background: var(--bg); }
+}
+
+:root[data-skin="miuix"] .actions {
+	background: var(--glass);
+	-webkit-backdrop-filter: saturate(180%) blur(20px);
+	backdrop-filter: saturate(180%) blur(20px);
+	border-top: 1px solid var(--glass-line);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+	:root[data-skin="miuix"] .actions { background: var(--bg); }
+}
+
+/* Miuix 顶部只有那个设置图标，标题在正文里以大字出现 */
+:root[data-skin="miuix"] .topbar-title { display: none; }
+
+:root[data-skin="miuix"] .card,
+:root[data-skin="miuix"] .status-card,
+:root[data-skin="miuix"] .sheet-list { border: none; }
+
+/* 这里**不能**写 `:root[data-skin="miuix"] .status-card { background: var(--ok-bg) }`。
+   它的特异性是 (0,3,0)，会压过下面的 `.status-card.is-warn` (0,2,0)，
+   结果是「未接管」这种中性状态也被染成绿色 —— 状态卡于是恒绿，
+   成功和失败长得一模一样。成功态的背景本来就由 `.status-card.is-ok` 统一给了。 */
+
+:root[data-skin="miuix"] .sheet { border-radius: 24px 24px 0 0; }
+
+/* Miuix 的开关：灰轨道 + 白滑块。深色下轨道用 --surface-3，
+   与卡片底色拉开一档，否则轨道和卡片糊成一块。 */
+:root[data-skin="miuix"][data-theme="dark"] .switch-track { background: var(--surface-3); }
+
+/* ── Material 3：染色顶栏 + 轮廓卡 + tonal 按钮 ──────────────── */
+
+:root[data-skin="material3"] {
+	--r-card: 12px;
+	--r-sunk: 8px;
+	--title-size: 22px;
+	--title-weight: 500;
+
+	/* M3 tonal（filled tonal）按钮的底色，对应 secondary-container。
+	   不能复用 --accent-weak：#eef4ff 压在 --bg (#f5f5f5) 上几乎看不出填色，
+	   按钮会变成"没上色的白底蓝字"，与 Miuix 的灰底实心区分不开。 */
+	--tonal: #d8e4fd;
+}
+
+:root[data-skin="material3"][data-theme="dark"] {
+	--tonal: #12395c;
+}
+
+/* M3 的小号 top app bar：surface-container 染色 + 承载标题 + 高 64。 */
+:root[data-skin="material3"] .topbar {
+	background: var(--surface-container);
+	border-bottom: none;
+	height: 64px;
+	padding: 0 20px;
+	gap: 8px;
+}
+
+:root[data-skin="material3"] .iconbtn { margin-left: -10px; }
+
+:root[data-skin="material3"] .topbar-title {
+	display: block;
+	font-size: 22px;
+	font-weight: 500;
+	letter-spacing: 0;
+}
+
+/* M3 的标题就在顶栏里，正文不再重复一遍 */
+:root[data-skin="material3"] .page-title { display: none; }
+
+/* 「轮廓卡」：M3 的 outlined card 是透明底 + 描边，不像 Miuix 那样靠白底浮起。
+   这一条把整页的观感从「白色浮起卡片」换成「平面线框」。 */
+:root[data-skin="material3"] .card,
+:root[data-skin="material3"] .sheet-list {
+	background: transparent;
+	border: 1px solid var(--line-2);
+}
+
+/* 状态卡是这一屏的主角，M3 里用 filled container 强调，不做透明 */
+:root[data-skin="material3"] .status-card { border: 1px solid var(--line-2); }
+
+:root[data-skin="material3"] .status-card.is-warn,
+:root[data-skin="material3"] .status-card.is-off {
+	background: var(--surface-container);
+}
+
+:root[data-skin="material3"] .actions {
+	background: var(--bg);
+	border-top: 1px solid var(--line);
+}
+
+/* M3 的按钮两级：次级是 filled tonal（弱色填充），主级是 filled。
+   圆角收到 12px —— Miuix 那边是全药丸，这样一眼就能分出来。 */
+:root[data-skin="material3"] .btn {
+	background: var(--tonal);
+	border: none;
+	border-radius: 12px;
+	color: var(--accent-fg);
+}
+
+:root[data-skin="material3"] .btn-primary {
+	background: var(--accent);
+	color: var(--on-accent);
+}
+
+/* M3 深色的 primary 是「亮底深字」，跟浅色反过来，这是规范不是随手定的 */
+:root[data-skin="material3"][data-theme="dark"] .btn-primary {
+	background: #a8c7fa;
+	color: #08203f;
+}
+
+:root[data-skin="material3"] .sheet { border-radius: 28px 28px 0 0; }
+
+/* M3 的输入框沿用它自己的形态：填充式（底部一条下划线感），
+   圆角小、无整圈描边 —— 和 Miuix 的圆角填充块区分开。 */
+:root[data-skin="material3"] .field {
+	border-radius: 8px 8px 0 0;
+	margin: 0 12px;
+	border-bottom: 1px solid var(--line-2);
+}
+
+:root[data-skin="material3"] .field:first-of-type { border-radius: 8px 8px 0 0; }
+
+:root[data-skin="material3"] .chips {
+	gap: 8px;
+}
+
+:root[data-skin="material3"] .chip {
+	border: 1px solid var(--line-2);
+	background: transparent;
+	color: var(--accent-fg);
+}
+
+/* M3 的开关轨道更扁，滑块是实心圆（无阴影） */
+:root[data-skin="material3"] .switch-track { border-radius: 999px; }
+
+/* outlined segmented button：描边分段 + 细分隔线 + 选中项填
+   secondary-container 并加勾选标记。和 Miuix 的「灰轨道 + 白滑块」是两种
+   完全不同的形态，这是设置面板里最好认的差别。 */
+:root[data-skin="material3"] .seg {
+	background: transparent;
+	border: 1px solid var(--line-2);
+	padding: 0;
+	overflow: hidden;
+}
+
+:root[data-skin="material3"] .seg-item {
+	height: 40px;
+	border-radius: 0;
+}
+
+:root[data-skin="material3"] .seg-item + .seg-item {
+	border-left: 1px solid var(--line-2);
+}
+
+:root[data-skin="material3"] .seg-item[aria-pressed="true"] {
+	background: var(--accent-weak);
+	color: var(--accent-fg);
+}
+
+:root[data-skin="material3"] .seg-item[aria-pressed="true"]::before {
+	content: "✓ ";
+}
+
+/* ══════════════════════════════════════════════ 基础 */
+
+* { box-sizing: border-box; }
+
+html, body {
+	margin: 0;
+	padding: 0;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--sans);
+	font-size: 16px;
+	line-height: 1.5;
+	-webkit-text-size-adjust: 100%;
+	-webkit-tap-highlight-color: transparent;
+	overscroll-behavior-y: none;
+}
+
+body {
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+	padding-top: env(safe-area-inset-top);
+}
+
+/* ══════════════════════════════════════════════ 顶栏 */
+
+.topbar {
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	height: 56px;
+	padding: 0 16px;
+}
+
+.iconbtn {
+	flex: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	margin-left: -6px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--text);
+	cursor: pointer;
+}
+
+.iconbtn:active { background: var(--surface-2); }
+
+.iconbtn svg { display: block; }
+
+.topbar-title {
+	margin: 0;
+	font-weight: 500;
+}
+
+/* ══════════════════════════════════════════════ 主体 */
+
+.main {
+	flex: 1;
+	width: 100%;
+	max-width: 640px;
+	margin: 0 auto;
+	padding: 0 16px 24px;
+}
+
+.page-title {
+	margin: 8px 0 18px -2px;
+	font-size: var(--title-size);
+	font-weight: var(--title-weight);
+	letter-spacing: -0.02em;
+	line-height: 1.2;
+}
+
+.block { margin-top: 22px; }
+
+.block-title {
+	margin: 0 0 8px 2px;
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text-2);
+}
+
+.card {
+	background: var(--surface);
+	border-radius: var(--r-card);
+	overflow: hidden;
+}
+
+.placeholder {
+	padding: 18px 16px;
+	font-size: 14px;
+	color: var(--text-3);
+}
+
+/* ══════════════════════════════════════════════ 状态卡 */
+
+.status-card {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	padding: 16px 18px;
+	border-radius: var(--r-card);
+	background: var(--surface-2);
+}
+
+.status-card.is-ok   { background: var(--ok-bg); }
+.status-card.is-warn { background: var(--surface-2); }
+.status-card.is-off  { background: var(--surface-2); }
+
+.status-text { flex: 1; min-width: 0; }
+
+/* 标题一律用前景色。第一版把它染成绿色，于是「绿色文字 + 绿色底」既不像
+   强调也不像正文，还和旁边的蓝色按钮抢戏 —— 这是"配色怪"的主因。 */
+.status-title {
+	margin: 0;
+	font-size: 17px;
+	font-weight: 600;
+	color: var(--text);
+	letter-spacing: -0.01em;
+}
+
+/* 这里显示的是**实测生效的目标地址**，所以用等宽 —— 它是要逐位核对的 */
+.status-sub {
+	margin: 3px 0 0;
+	font-size: 13px;
+	font-family: var(--mono);
+	color: var(--text-2);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.status-icon { flex: none; display: block; }
+.status-icon svg { display: block; }
+
+/* ══════════════════════════════════════════════ 输入框 */
+
+.field {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 6px 16px;
+	min-height: 56px;
+}
+
+.field + .field { border-top: 1px solid var(--line); }
+
+/* Miuix 下字段是卡内的一行，标签固定宽度对齐 */
+.field-name {
+	flex: none;
+	width: 52px;
+	font-size: 14px;
+	color: var(--text-2);
+}
+
+/* 输入框本身不要框：外层已经有卡片/描边了，再套一圈就是双重边框。
+   聚焦反馈靠文字色 + 底部一条蓝线（见下），符合"蓝=可交互"的纪律。 */
+.field-input {
+	flex: 1;
+	min-width: 0;
+	height: 44px;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--text);
+	font-family: var(--mono);
+	font-size: 15px;
+	letter-spacing: -0.01em;
+	outline: none;
+}
+
+.field-input::placeholder {
+	color: var(--text-3);
+	font-family: var(--sans);
+	font-size: 14px;
+}
+
+.field:focus-within { background: var(--accent-weak); }
+
+/* ══════════════════════════════════════════════ 常用胶囊 */
+
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 10px;
+	padding: 0 2px;
+}
+
+/* 胶囊是"可点的"，所以用描边蓝而不是实心蓝：实心块在浅色底上是一整块
+   高饱和色，四个摆一起会把整页的重心从主按钮那边拽过来。 */
+.chip {
+	height: 32px;
+	padding: 0 14px;
+	border: 1px solid var(--accent-fg);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--accent-fg);
+	font-family: inherit;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.chip:active { background: var(--accent-weak); }
+
+/* ══════════════════════════════════════════════ 开关行 */
+
+.toggle-row {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	padding: 12px 16px;
+	min-height: 60px;
+	cursor: pointer;
+}
+
+.toggle-row + .toggle-row { border-top: 1px solid var(--line); }
+
+.toggle-text { flex: 1; min-width: 0; }
+
+.toggle-name {
+	display: block;
+	font-size: 15px;
+	font-weight: 500;
+	color: var(--text);
+}
+
+.toggle-hint {
+	display: block;
+	margin-top: 2px;
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--text-3);
+}
+
+/* 真正的 checkbox 藏起来但保留在无障碍树里（不能 display:none，
+   那样它就不参与 Tab 焦点和状态播报了）。 */
+.switch {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	border: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+}
+
+/* 轨道和滑块都用伪元素画：这样两套皮肤可以各自换形态，不用换 DOM。 */
+.toggle-row { position: relative; }
+
+.toggle-row::after {
+	content: "";
+	flex: none;
+	width: 50px;
+	height: 30px;
+	border-radius: 999px;
+	background: var(--surface-2);
+	transition: background .18s ease;
+}
+
+/* 滑块。用 box-shadow 内嵌画，避免再套一个元素。 */
+.toggle-row::before {
+	content: "";
+	position: absolute;
+	right: 19px;
+	top: 50%;
+	z-index: 1;
+	width: 26px;
+	height: 26px;
+	margin-top: -13px;
+	border-radius: 50%;
+	background: #ffffff;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+	transition: transform .18s cubic-bezier(.32, .72, 0, 1);
+}
+
+/* 选中态：轨道变蓝、滑块右移。这是页面里除主按钮外唯一的蓝，
+   面积小且在手指下，不会与主按钮抢戏。
+   不用 :has() —— 老 WebView 不一定支持，而开关失效是致命的。
+   改由 app.js 维护 is-on 类，一行 JS 换掉一个兼容性风险。 */
+.toggle-row.is-on::after { background: var(--accent); }
+.toggle-row.is-on::before { transform: translateX(-20px); }
+
+.switch:focus-visible ~ .toggle-text { color: var(--accent-fg); }
+
+/* ══════════════════════════════════════════════ 提示条 */
+
+.banner {
+	margin: 0 0 16px;
+	padding: 12px 14px;
+	border-radius: var(--r-sunk);
+	background: var(--surface-2);
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-2);
+}
+
+.banner-error { color: var(--danger); }
+
+.footnote {
+	margin: 18px 2px 0;
+	font-size: 12px;
+	line-height: 1.6;
+	color: var(--text-3);
+}
+
+/* ══════════════════════════════════════════════ 底部操作条 */
+
+.actions {
+	position: sticky;
+	bottom: 0;
+	z-index: 20;
+	display: flex;
+	gap: 10px;
+	padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+}
+
+.btn {
+	flex: 1;
+	height: 46px;
+	padding: 0 16px;
+	border: none;
+	border-radius: 999px;
+	background: var(--surface-2);
+	color: var(--text);
+	font-family: inherit;
+	font-size: 15px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: opacity .12s ease;
+}
+
+.btn:active { opacity: .6; }
+
+.btn:disabled { opacity: .45; cursor: default; }
+
+/* 全屏唯一的实心蓝。SukiSU 也是这么用的：它整页只有那个 FAB 是实心蓝。 */
+.btn-primary {
+	background: var(--accent);
+	color: var(--on-accent);
+}
+
+/* ══════════════════════════════════════════════ 设置面板 */
+
+.scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	background: var(--scrim);
+	border: none;
+	padding: 0;
+	opacity: 0;
+	transition: opacity .18s ease;
+}
+
+.scrim[hidden] { display: none; }
+.scrim.is-open { opacity: 1; }
+
+.sheet {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 50;
+	max-height: 86vh;
+	overflow-y: auto;
+	padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
+	background: var(--surface);
+	box-shadow: var(--shadow-sheet);
+	transform: translateY(101%);
+	transition: transform .22s cubic-bezier(.32, .72, 0, 1);
+}
+
+.sheet[hidden] { display: none; }
+.sheet.is-open { transform: translateY(0); }
+
+.sheet-handle {
+	width: 40px;
+	height: 4px;
+	margin: 0 auto 14px;
+	border-radius: 999px;
+	background: var(--line-2);
+}
+
+.sheet-title {
+	margin: 0 0 20px 4px;
+	font-size: 20px;
+	font-weight: 600;
+}
+
+.field-label {
+	margin: 0 0 8px 4px;
+	font-size: 13px;
+	color: var(--text-2);
+}
+
+.field-hint {
+	margin: 8px 4px 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--text-3);
+}
+
+.seg {
+	display: flex;
+	align-items: center;
+	padding: 4px;
+	border-radius: 999px;
+	background: var(--surface-2);
+}
+
+.seg-item {
+	flex: 1;
+	min-width: 0;
+	height: 34px;
+	padding: 0 6px;
+	border: none;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-2);
+	font-family: inherit;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 选中态是白色滑块 + 蓝色文字（SukiSU 的分段控件就是这个做法：
+   accent 只落在文字上，不铺底色）。深色下的覆盖见 Miuix 皮肤块。 */
+.seg-item[aria-pressed="true"] {
+	background: var(--surface);
+	color: var(--accent-fg);
+}
+
+/* Miuix 的分段控件：灰轨道 + 白滑块 + 蓝字。
+   深色下轨道原本也是 --surface-2，和滑块同一个颜色 —— 选中项只剩一行蓝字，
+   滑块整个消失。把轨道压暗一档（--surface-3），就有了「凹陷轨道 + 浮起滑块」
+   的正常层次。这两条**必须限定 miuix 皮肤**：M3 的分段控件是另一种形态
+   （描边分段），如果不限定皮肤，会按书写顺序压过 M3 那套规则。 */
+:root[data-skin="miuix"][data-theme="dark"] .seg { background: var(--surface-3); }
+
+:root[data-skin="miuix"][data-theme="dark"] .seg-item[aria-pressed="true"] {
+	background: var(--surface-2);
+	color: var(--accent-fg);
+}
+
+.sheet-list {
+	margin-top: 4px;
+	border-radius: var(--r-sunk);
+	background: var(--surface-3);
+	overflow: hidden;
+}
+
+.list-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	min-height: 52px;
+	padding: 12px 16px;
+	font-size: 14px;
+}
+
+.list-row + .list-row { border-top: 1px solid var(--line); }
+
+.list-value {
+	color: var(--text-2);
+	text-align: right;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--mono);
+	font-size: 13px;
+}
+
+.sheet-group { margin-top: 22px; }
+
+/* 关掉动画给那些把「减少动态效果」打开的用户 */
+@media (prefers-reduced-motion: reduce) {
+	.scrim, .sheet, .btn, .toggle-row::before, .toggle-row::after { transition: none; }
+}

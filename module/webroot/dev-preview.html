@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-skin="miuix" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>自定义 DNS（开发预览）</title>
+
+<!--
+	dev-preview.html —— 给人看渲染效果用的预览页，**不会打进模块包**
+	（build.sh 里显式排除 dev-preview.html）。
+
+	它和 index.html 的唯一区别是：在 app.js 之前塞了一个**假的 ksu 桥**。
+	于是拿浏览器直接打开就能看两套皮肤、两个主题、以及按钮点下去之后的
+	状态变化，不需要真机、不需要 KernelSU。
+
+	真机的数据（状态卡的字段、规则条数）是照着 K30 Pro 上跑出来的
+	`dns-apply.sh status` 输出造的，字段名与真机一致 —— 预览页里能看到
+	什么，真机上就能看到什么。
+-->
+
+<script>
+/* ── 假的 KernelSU 桥 ──────────────────────────────────────────────
+   真桥的语义：ksu.exec(command, optionsJson, callbackName) 执行结束后
+   反向调用 window[callbackName](errno, stdout, stderr)。
+   这里照着这个签名实现一个内存版的，让页面逻辑可以原样跑起来。 */
+(function () {
+	// 预览用的假状态，字段名与 dns-apply.sh status 的输出完全一致
+	var st = {
+		ENABLED: '0',
+		WANT: '0',
+		IPV4: '',
+		IPV6: '',
+		TCP: '1',
+		BLOCK6: '1',
+		AUTOSTART: '1',
+		ACTIVE4: '',
+		ACTIVE6: '',
+		RULES: '0',
+		IPT: '1',
+		IP6: '1',
+		// 想预览「本内核支持 IPv6 NAT」的另一种文案，把这行改成 '1'
+		IP6NAT: '0',
+		VER: 'v0.1.0'
+	};
+
+	function dump() {
+		var out = [];
+		for (var k in st) out.push(k + '=' + st[k]);
+		return out.join('\n') + '\n';
+	}
+
+	function parseKV(text) {
+		var out = {};
+		text.split('\n').forEach(function (line) {
+			var i = line.indexOf('=');
+			if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+		});
+		return out;
+	}
+
+	function rules() {
+		// 3 条链内规则 + 1 条跳转，再按开关算上 IPv6 那两条链
+		var n = 4;
+		if (st.IPV6 && st.IP6NAT === '1') n += 3;
+		if (st.BLOCK6 === '1') n += 4;
+		return String(n);
+	}
+
+	function handle(cmd) {
+		if (cmd.indexOf('status') >= 0) return { errno: 0, stdout: dump(), stderr: '' };
+
+		if (cmd.indexOf('disable') >= 0) {
+			st.ENABLED = '0';
+			st.WANT = '0';
+			st.ACTIVE4 = '';
+			st.RULES = '0';
+			return { errno: 0, stdout: '', stderr: '' };
+		}
+
+		if (cmd.indexOf('use ') >= 0) {
+			var args = cmd.slice(cmd.indexOf('use ') + 4).trim().split(/\s+/);
+			var kv = {};
+			args.forEach(function (a) {
+				var i = a.indexOf('=');
+				if (i > 0) kv[a.slice(0, i)] = a.slice(i + 1);
+			});
+			st.IPV4 = kv.ipv4 || '';
+			st.IPV6 = kv.ipv6 || '';
+			st.TCP = kv.tcp || '0';
+			st.BLOCK6 = kv.block6 || '0';
+			st.AUTOSTART = kv.autostart || '0';
+			// 预览页没有真的 iptables，就当它挂上了
+			st.ENABLED = st.IPV4 ? '1' : '0';
+			st.WANT = '1';
+			st.ACTIVE4 = st.IPV4;
+			st.ACTIVE6 = st.IPV6 && st.IP6NAT === '1' ? '[' + st.IPV6 + ']' : '';
+			st.RULES = st.ENABLED === '1' ? rules() : '0';
+			return { errno: 0, stdout: '', stderr: '' };
+		}
+
+		return { errno: 0, stdout: '', stderr: '' };
+	}
+
+	window.ksu = {
+		exec: function (command, optionsJson, callbackName) {
+			// 用一个很小的延时模拟跨进程序的往返，好让"处理中…"看得见
+			setTimeout(function () {
+				var r = handle(String(command));
+				if (typeof window[callbackName] === 'function') {
+					window[callbackName](r.errno, r.stdout, r.stderr);
+				}
+			}, 150);
+		},
+		toast: function (msg) {
+			var t = document.getElementById('mockToast');
+			t.textContent = String(msg);
+			t.classList.add('is-open');
+			clearTimeout(t._h);
+			t._h = setTimeout(function () { t.classList.remove('is-open'); }, 1800);
+		}
+	};
+})();
+</script>
+
+<style>
+/* 只在预览页出现的两个小东西：提示徽标和 toast。不打进模块包。 */
+#mockBadge {
+	position: fixed;
+	right: 12px;
+	bottom: calc(84px + env(safe-area-inset-bottom));
+	z-index: 60;
+	padding: 4px 10px;
+	border-radius: 999px;
+	background: rgba(0, 0, 0, .72);
+	color: #fff;
+	font-size: 11px;
+	pointer-events: none;
+}
+#mockToast {
+	position: fixed;
+	left: 50%;
+	bottom: calc(84px + env(safe-area-inset-bottom));
+	z-index: 60;
+	max-width: 80vw;
+	padding: 8px 14px;
+	border-radius: 999px;
+	background: rgba(0, 0, 0, .82);
+	color: #fff;
+	font-size: 13px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	transform: translate(-50%, 8px);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity .18s ease, transform .18s ease;
+}
+#mockToast.is-open { opacity: 1; transform: translate(-50%, 0); }
+</style>
+
+<script>
+/* 与 index.html 相同：首次绘制前把「跟随系统」解析成具体的 light / dark */
+(function () {
+	var dark = false;
+	try { dark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+	var pref = 'system';
+	try { pref = localStorage.getItem('dns.theme') || 'system'; } catch (e) {}
+	if (pref === 'dark' || (pref === 'system' && dark)) {
+		document.documentElement.dataset.theme = 'dark';
+	} else {
+		document.documentElement.dataset.theme = 'light';
+	}
+	try {
+		var skin = localStorage.getItem('dns.skin');
+		if (skin) document.documentElement.dataset.skin = skin;
+	} catch (e) {}
+})();
+</script>
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+	<button type="button" class="iconbtn" id="btnSettings" aria-label="设置">
+		<svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+			<path d="M3 6h16M3 11h10M3 16h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+		</svg>
+	</button>
+	<h1 class="topbar-title">自定义 DNS</h1>
+</header>
+
+<main class="main" id="main">
+	<h2 class="page-title">自定义 DNS</h2>
+
+	<div class="banner" id="banner" hidden></div>
+
+	<section class="status-card" id="statusCard">
+		<div class="status-text">
+			<p class="status-title" id="statusTitle">正在读取…</p>
+			<p class="status-sub" id="statusSub"></p>
+		</div>
+		<span class="status-icon" id="statusIcon" aria-hidden="true"></span>
+	</section>
+
+	<section class="block">
+		<h3 class="block-title">DNS 地址</h3>
+		<div class="card">
+			<label class="field" for="in4">
+				<span class="field-name">IPv4</span>
+				<input class="field-input" id="in4" type="text" inputmode="decimal"
+					autocomplete="off" autocapitalize="off" spellcheck="false"
+					placeholder="223.5.5.5">
+			</label>
+			<label class="field" for="in6">
+				<span class="field-name">IPv6</span>
+				<input class="field-input" id="in6" type="text" inputmode="text"
+					autocomplete="off" autocapitalize="off" spellcheck="false"
+					placeholder="留空表示不改向 IPv6（可留空）">
+			</label>
+		</div>
+		<div class="chips" id="chips">
+			<button type="button" class="chip" data-v4="223.5.5.5" data-v6="2400:3200::1">阿里</button>
+			<button type="button" class="chip" data-v4="119.29.29.29" data-v6="2402:4e00::">腾讯</button>
+			<button type="button" class="chip" data-v4="114.114.114.114">114</button>
+			<button type="button" class="chip" data-v4="1.1.1.1" data-v6="2606:4700:4700::1111">Cloudflare</button>
+		</div>
+	</section>
+
+	<section class="block">
+		<h3 class="block-title">开关</h3>
+		<div class="card">
+			<label class="toggle-row" for="swTcp">
+				<span class="toggle-text">
+					<span class="toggle-name">同时接管 TCP 53</span>
+					<span class="toggle-hint">域名太长时会回落到 TCP 查询</span>
+				</span>
+				<input class="switch" id="swTcp" type="checkbox">
+			</label>
+			<label class="toggle-row" for="swBlock6">
+				<span class="toggle-text">
+					<span class="toggle-name">屏蔽 IPv6 DNS</span>
+					<span class="toggle-hint" id="hintBlock6">本内核无 IPv6 NAT，靠丢弃逼回落 IPv4</span>
+				</span>
+				<input class="switch" id="swBlock6" type="checkbox">
+			</label>
+			<label class="toggle-row" for="swAuto">
+				<span class="toggle-text">
+					<span class="toggle-name">开机自动应用</span>
+					<span class="toggle-hint">关掉后重启不再挂规则</span>
+				</span>
+				<input class="switch" id="swAuto" type="checkbox">
+			</label>
+		</div>
+	</section>
+
+	<p class="footnote" id="footnote"></p>
+</main>
+
+<footer class="actions">
+	<button type="button" class="btn" id="btnOff">关闭并清除</button>
+	<button type="button" class="btn btn-primary" id="btnApply">应用并生效</button>
+</footer>
+
+<button type="button" class="scrim" id="scrim" hidden aria-label="关闭设置"></button>
+
+<section class="sheet" id="sheet" hidden aria-label="设置">
+	<div class="sheet-handle"></div>
+	<h2 class="sheet-title">设置</h2>
+
+	<div class="sheet-group">
+		<p class="field-label">外观</p>
+		<div class="seg" role="group" aria-label="皮肤">
+			<button type="button" class="seg-item" data-skin="miuix" aria-pressed="true">Miuix</button>
+			<button type="button" class="seg-item" data-skin="material3" aria-pressed="false">Material 3</button>
+		</div>
+	</div>
+
+	<div class="sheet-group">
+		<p class="field-label">主题</p>
+		<div class="seg" role="group" aria-label="主题">
+			<button type="button" class="seg-item" data-theme-opt="system" aria-pressed="true">跟随系统</button>
+			<button type="button" class="seg-item" data-theme-opt="light" aria-pressed="false">浅色</button>
+			<button type="button" class="seg-item" data-theme-opt="dark" aria-pressed="false">深色</button>
+		</div>
+		<p class="field-hint">KernelSU 的 WebView 不一定上报系统深浅；这里可以手动指定。</p>
+	</div>
+
+	<div class="sheet-group">
+		<p class="field-label">运行状态</p>
+		<div class="sheet-list">
+			<div class="list-row"><span>生效规则条数</span><span class="list-value" id="sRules">—</span></div>
+			<div class="list-row"><span>当前生效目标</span><span class="list-value" id="sActive">—</span></div>
+			<div class="list-row"><span>IPv6 改向</span><span class="list-value" id="sNat6">—</span></div>
+		</div>
+	</div>
+
+	<div class="sheet-group">
+		<p class="field-label">关于</p>
+		<div class="sheet-list">
+			<div class="list-row"><span>自定义 DNS</span><span class="list-value" id="sVersion">—</span></div>
+		</div>
+	</div>
+</section>
+
+<div id="mockBadge">开发预览 · 假桥</div>
+<div id="mockToast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,135 @@
+# 自定义 DNS
+
+Android 上填自定义 DNS 的 KernelSU / Magisk 模块。在 WebUI 里填地址，全系统的明文 DNS 查询改走它。
+
+零常驻进程，应用后立即生效。
+
+![WebUI](docs/webui.png)
+
+## 原理
+
+Android 10 起，系统没有设置 DNS 的公开接口，常见的三条路都不通：
+
+| 方式 | 结果 |
+| --- | --- |
+| `setprop net.dns1` / `net.dns2` | netd 已不再读取 |
+| `ndc resolver setnetdns` | 命令已移除（Android 16 报 `500 0 Command not recognized`） |
+| netd resolver AIDL | 受 `NETWORK_STACK` 保护，root shell 拿不到 |
+
+模块改的是包的去向，在 `nat/OUTPUT` 上把 53 端口流量改写到指定地址：
+
+```sh
+iptables -t nat -A OUTPUT -j DNSMOD
+iptables -t nat -A DNSMOD -d 127.0.0.0/8 -j RETURN
+iptables -t nat -A DNSMOD -p udp --dport 53 -j DNAT --to-destination <ipv4>:53
+iptables -t nat -A DNSMOD -p tcp --dport 53 -j DNAT --to-destination <ipv4>:53
+```
+
+用 `DNAT` 是为了避开后端进程：目的地直接改写成你填的地址，应答由那台服务器给出。若改用 `REDIRECT`，转发终点落在本机端口，还得额外跑一个 dnsmasq 或 dnscrypt-proxy 来应答。
+
+规则挂在 `OUTPUT` 上，只管本机发出的查询。链内先放一条回环豁免，避免把本机自己的查询卷进来。
+
+## 要求
+
+- Android 10 及以上
+- 内核的 `iptables` 有 `nat` 表
+- KernelSU / ReSukiSU / Magisk。WebUI 依赖 KernelSU 系管理器，Magisk 没有内置 WebUI
+
+## 安装
+
+从 Release 下载 zip，或用命令行：
+
+```sh
+ksud module install dns-modifier-v0.1.0.zip
+```
+
+## 使用
+
+在管理器里打开本模块的 WebUI，填入 IPv4 DNS，IPv6 可留空，点「应用并生效」。WebUI 里有阿里、腾讯、114、Cloudflare 的快捷填充。
+
+把系统的 `设置 → 网络和互联网 → 私人 DNS` 设为关闭。DoT 走 853 端口，本模块管不到。
+
+## 配置
+
+`/data/adb/dns-modifier/config.conf`
+
+```ini
+ipv4=223.5.5.5    # DNS 地址，必填
+ipv6=             # 可留空
+tcp=1             # 同时接管 TCP 53
+block6=1          # 丢弃 IPv6 DNS，迫使解析器回落 IPv4
+autostart=1       # 开机自动应用
+enable=1          # 0 = 已关闭
+```
+
+命令行（需 root）：
+
+```sh
+S=/data/adb/modules/dns-modifier/scripts/dns-apply.sh
+
+sh $S status                # 输出 key=value 状态
+sh $S use ipv4=1.1.1.1      # 校验 + 保存 + 立即生效
+sh $S apply                 # 按当前配置重挂规则
+sh $S off                   # 摘掉规则，保留配置
+sh $S disable               # 摘掉规则并取消开机自启
+```
+
+模块卡片上的「操作」按钮会打印当前状态，等价于 `sh $S status` 的可读版。
+
+## 填错了 DNS
+
+在 WebUI 里点「关闭并清除」，或：
+
+```sh
+sh /data/adb/modules/dns-modifier/scripts/dns-apply.sh disable
+```
+
+规则只挂在 `OUTPUT` 上，不影响 adb、WebUI 和其它网络，所以这个操作总能执行。关闭状态写进配置，重启后不会自己挂回来。
+
+## 限制
+
+只管明文 DNS（UDP / TCP 53）。系统「私人 DNS」走 DoT（853），App 内置的 DoH 走 443，两者都绕过本模块。
+
+部分机型的内核没有 `ip6tables` 的 `nat` 表（K30 Pro / Android 16 报 `Table does not exist`），IPv6 查询改不了目的地，只能由 `block6` 丢弃，让解析器回落 IPv4。脚本启动时会探测，不支持就在 WebUI 里说明。
+
+系统本身不知道 DNS 被改了。地址不会写进 `LinkProperties`，应用通过 API 读到的仍是运营商下发的值。
+
+DNS 不通时系统可能判定该网络无 Internet 并自动切到别的网络。此时规则仍在生效，只是走的不是你以为的那条链路。
+
+## 目录结构
+
+```
+.
+├── build.sh                   # 打包（纯 shell 模块，无编译步骤）
+├── docs/webui.png
+└── module/                    # 打进 zip 的内容
+    ├── module.prop
+    ├── customize.sh           # 安装 / 升级
+    ├── service.sh             # 开机自启（late_start service）
+    ├── action.sh              # 模块卡片的「操作」按钮
+    ├── uninstall.sh
+    ├── scripts/dns-apply.sh   # 规则唯一入口
+    └── webroot/               # WebUI
+        ├── index.html
+        ├── app.js
+        ├── style.css
+        ├── kernelsu.js        # KernelSU WebUI 桥的薄封装
+        └── dev-preview.html   # 开发预览页，内置假桥，不进模块包
+```
+
+## 构建
+
+```sh
+sh build.sh              # 产物 dist/dns-modifier-<version>.zip
+sh build.sh --install    # 打包后用 adb + ksud 装到设备
+```
+
+zip 的根目录就是模块内容（`module.prop` 在最外层）。
+
+## 卸载
+
+在管理器里卸载。`uninstall.sh` 会先摘掉规则，避免留下无人管理的 iptables 链。
+
+## 许可
+
+BSD-3-Clause

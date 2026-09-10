@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-skin="miuix" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>自定义 DNS</title>
+
+<script>
+/* 在**首次绘制之前**把「跟随系统」解析成具体的 light / dark 写进 data-theme。
+   这样 style.css 里只需要两套 token，不必在 prefers-color-scheme 媒体查询里
+   再抄一遍深色值（抄两份迟早不同步）。放在这里而不是 app.js，是因为
+   app.js 是 module，执行时机在解析之后，会闪一下白底。 */
+(function () {
+	var dark = false;
+	try { dark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+	var pref = 'system';
+	try { pref = localStorage.getItem('dns.theme') || 'system'; } catch (e) {}
+	if (pref === 'dark' || (pref === 'system' && dark)) {
+		document.documentElement.dataset.theme = 'dark';
+	} else {
+		document.documentElement.dataset.theme = 'light';
+	}
+	try {
+		var skin = localStorage.getItem('dns.skin');
+		if (skin) document.documentElement.dataset.skin = skin;
+	} catch (e) {}
+})();
+</script>
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+	<button type="button" class="iconbtn" id="btnSettings" aria-label="设置">
+		<svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+			<path d="M3 6h16M3 11h10M3 16h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+		</svg>
+	</button>
+	<h1 class="topbar-title">自定义 DNS</h1>
+</header>
+
+<main class="main" id="main">
+	<h2 class="page-title">自定义 DNS</h2>
+
+	<div class="banner" id="banner" hidden></div>
+
+	<section class="status-card" id="statusCard">
+		<div class="status-text">
+			<p class="status-title" id="statusTitle">正在读取…</p>
+			<p class="status-sub" id="statusSub"></p>
+		</div>
+		<span class="status-icon" id="statusIcon" aria-hidden="true"></span>
+	</section>
+
+	<section class="block">
+		<h3 class="block-title">DNS 地址</h3>
+		<div class="card">
+			<label class="field" for="in4">
+				<span class="field-name">IPv4</span>
+				<input class="field-input" id="in4" type="text" inputmode="decimal"
+					autocomplete="off" autocapitalize="off" spellcheck="false"
+					placeholder="223.5.5.5">
+			</label>
+			<label class="field" for="in6">
+				<span class="field-name">IPv6</span>
+				<input class="field-input" id="in6" type="text" inputmode="text"
+					autocomplete="off" autocapitalize="off" spellcheck="false"
+					placeholder="留空表示不改向 IPv6（可留空）">
+			</label>
+		</div>
+		<div class="chips" id="chips">
+			<button type="button" class="chip" data-v4="223.5.5.5" data-v6="2400:3200::1">阿里</button>
+			<button type="button" class="chip" data-v4="119.29.29.29" data-v6="2402:4e00::">腾讯</button>
+			<button type="button" class="chip" data-v4="114.114.114.114">114</button>
+			<button type="button" class="chip" data-v4="1.1.1.1" data-v6="2606:4700:4700::1111">Cloudflare</button>
+		</div>
+	</section>
+
+	<section class="block">
+		<h3 class="block-title">开关</h3>
+		<div class="card">
+			<label class="toggle-row" for="swTcp">
+				<span class="toggle-text">
+					<span class="toggle-name">同时接管 TCP 53</span>
+					<span class="toggle-hint">域名太长时会回落到 TCP 查询</span>
+				</span>
+				<input class="switch" id="swTcp" type="checkbox">
+			</label>
+			<label class="toggle-row" for="swBlock6">
+				<span class="toggle-text">
+					<span class="toggle-name">屏蔽 IPv6 DNS</span>
+					<span class="toggle-hint" id="hintBlock6">本内核无 IPv6 NAT，靠丢弃逼回落 IPv4</span>
+				</span>
+				<input class="switch" id="swBlock6" type="checkbox">
+			</label>
+			<label class="toggle-row" for="swAuto">
+				<span class="toggle-text">
+					<span class="toggle-name">开机自动应用</span>
+					<span class="toggle-hint">关掉后重启不再挂规则</span>
+				</span>
+				<input class="switch" id="swAuto" type="checkbox">
+			</label>
+		</div>
+	</section>
+
+	<p class="footnote" id="footnote"></p>
+</main>
+
+<footer class="actions">
+	<button type="button" class="btn" id="btnOff">关闭并清除</button>
+	<button type="button" class="btn btn-primary" id="btnApply">应用并生效</button>
+</footer>
+
+<button type="button" class="scrim" id="scrim" hidden aria-label="关闭设置"></button>
+
+<section class="sheet" id="sheet" hidden aria-label="设置">
+	<div class="sheet-handle"></div>
+	<h2 class="sheet-title">设置</h2>
+
+	<div class="sheet-group">
+		<p class="field-label">外观</p>
+		<div class="seg" role="group" aria-label="皮肤">
+			<button type="button" class="seg-item" data-skin="miuix" aria-pressed="true">Miuix</button>
+			<button type="button" class="seg-item" data-skin="material3" aria-pressed="false">Material 3</button>
+		</div>
+	</div>
+
+	<div class="sheet-group">
+		<p class="field-label">主题</p>
+		<div class="seg" role="group" aria-label="主题">
+			<button type="button" class="seg-item" data-theme-opt="system" aria-pressed="true">跟随系统</button>
+			<button type="button" class="seg-item" data-theme-opt="light" aria-pressed="false">浅色</button>
+			<button type="button" class="seg-item" data-theme-opt="dark" aria-pressed="false">深色</button>
+		</div>
+		<p class="field-hint">KernelSU 的 WebView 不一定上报系统深浅；这里可以手动指定。</p>
+	</div>
+
+	<div class="sheet-group">
+		<p class="field-label">运行状态</p>
+		<div class="sheet-list">
+			<div class="list-row"><span>生效规则条数</span><span class="list-value" id="sRules">—</span></div>
+			<div class="list-row"><span>当前生效目标</span><span class="list-value" id="sActive">—</span></div>
+			<div class="list-row"><span>IPv6 改向</span><span class="list-value" id="sNat6">—</span></div>
+		</div>
+	</div>
+
+	<div class="sheet-group">
+		<p class="field-label">关于</p>
+		<div class="sheet-list">
+			<div class="list-row"><span>自定义 DNS</span><span class="list-value" id="sVersion">—</span></div>
+		</div>
+	</div>
+</section>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+id=dns-modifier
+name=自定义 DNS
+version=v0.1.0
+versionCode=1
+author=TianyiTwT
+description=在 WebUI 里填两个 DNS 地址，全系统的明文 DNS 查询就改走它们。用 iptables DNAT 改写目的地，零常驻进程，重启后依然生效。

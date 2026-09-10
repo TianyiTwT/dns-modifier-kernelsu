@@ -126,6 +126,22 @@ sh build.sh --install    # 打包后用 adb + ksud 装到设备
 
 zip 的根目录就是模块内容（`module.prop` 在最外层）。
 
+### 自动构建
+
+推送到 `main`、提 PR、或在 Actions 页手动触发都会在 CI 上打一遍包，产物在该 run 的 Artifacts 里。CI 会顺带校验 zip 的结构（`module.prop` 在最外层、开发预览页没被打进去），并拦住任何混进 CR 的脚本。
+
+发版时把 `module/module.prop` 的 `version` 改掉，推一个同名的 tag：
+
+```sh
+sed -i 's/^version=.*/version=v0.2.0/' module/module.prop
+sed -i 's/^versionCode=.*/versionCode=2/' module/module.prop
+git commit -am "v0.2.0"
+git tag v0.2.0
+git push origin main --tags
+```
+
+tag 与 `module.prop` 的版本不一致时 CI 会直接失败，不会发出版本号对不上的包。
+
 ## 卸载
 
 在管理器里卸载。`uninstall.sh` 会先摘掉规则，避免留下无人管理的 iptables 链。

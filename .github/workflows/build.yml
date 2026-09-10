@@ -1,0 +1,102 @@
+name: build
+
+# 什么时候跑：
+#   - push 到 main：验证还能打出来
+#   - push 形如 v0.1.0 的 tag：打包并自动建 Release，zip 作为附件
+#   - PR：验证没打坏
+#   - 手动触发：产物在 run 的 Artifacts 里下载
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 同一个分支连续 push 时，旧的那次就没意义了，取消掉省 CI 额度
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 打包
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: tag 与 module.prop 的版本是否一致
+        # 不一致的话 Release 上挂的 zip 会带着另一个版本号。事后很难查，
+        # 而且 zip 的文件名就是从这里来的，直接拦住比发出去再改便宜。
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -e
+          VERSION=$(sed -n 's/^version=//p' module/module.prop | head -n 1)
+          if [ "$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "tag 是 $GITHUB_REF_NAME，但 module.prop 里写的是 $VERSION" >&2
+            exit 1
+          fi
+          echo "版本一致：$VERSION"
+
+      - name: 打包
+        # 纯 shell 模块，没有编译步骤。build.sh 里自带行尾自检：
+        # 任何 .sh 混进 CR 都会在这里失败（CRLF 的 shebang 会让脚本 exec 不了，
+        # 表现为"装完开机什么都不发生"，在 CI 上拦住比在设备上查便宜得多）。
+        run: |
+          set -e
+          sh build.sh
+          echo "── 产物 ──"
+          ls -la dist/
+
+      - name: 校验产物结构
+        # 两个容易出错的地方：zip 必须没有外层目录前缀（module.prop 要在最外层，
+        # 否则管理器装不上），以及开发预览页不能被打进去。
+        run: |
+          set -e
+          ZIP=$(ls dist/*.zip)
+          echo "检查 $ZIP"
+          unzip -Z1 "$ZIP"
+
+          for f in module.prop service.sh action.sh scripts/dns-apply.sh \
+                   webroot/index.html webroot/app.js webroot/style.css webroot/kernelsu.js; do
+            unzip -Z1 "$ZIP" | grep -qx "$f" || { echo "缺少 $f" >&2; exit 1; }
+          done
+
+          if unzip -Z1 "$ZIP" | grep -qx 'webroot/dev-preview.html'; then
+            echo "开发预览页被打进了模块包" >&2
+            exit 1
+          fi
+          echo "结构正确"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dns-modifier
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: 发布
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取回产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          ls -la dist/
+          # 重复推同一个 tag 时会撞上已存在的 Release，这时改为覆盖附件
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "$GITHUB_REF_NAME" --generate-notes \
+          || gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber

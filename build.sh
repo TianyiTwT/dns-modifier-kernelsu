@@ -56,8 +56,10 @@ rm -f "$ZIP"
 echo "── 打包 ──"
 # zip 的**根目录就是模块内容**（module.prop 在最外层），不带 module/ 前缀。
 # dev-preview.html 只是给人看渲染效果的预览页，不进模块包。
+# 排除模式写成 *dev-preview.html 而不是完整路径：带通配的写法不依赖 zip
+# 对"无通配模式要整名匹配"的语义，行为更确定。
 if command -v zip >/dev/null 2>&1; then
-	( cd module && zip -qr "../$ZIP" . -x 'webroot/dev-preview.html' )
+	( cd module && zip -qr "../$ZIP" . -x '*dev-preview.html' )
 else
 	# Windows 上通常没有 zip，用 python 兜底
 	PY=$(command -v python3 || command -v python || true)
